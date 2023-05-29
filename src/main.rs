@@ -1,9 +1,41 @@
 use std::{convert::TryInto, io};
 
-macro_rules! parse_input {
-    ($x:expr, $t:ident) => {
-        $x.trim().parse::<$t>().unwrap()
+// parse single value
+macro_rules! parse_single {
+    ($s:expr, $t:ty) => {
+        $s.trim().parse::<$t>().unwrap()
     };
+}
+
+// parse space separted values
+macro_rules! parse_vec {
+    ($s:expr, $t:ty) => {{
+        let s = $s;
+        let split = s.split_whitespace();
+        let vec: Vec<$t> = split.map(|s| s.trim().parse::<$t>().unwrap()).collect();
+        vec
+    }};
+}
+
+// parse tuple of space separted values
+macro_rules! parse_tuple {
+    ($s:expr, $($t:ty),*) => {
+		  {
+			let s=$s;
+            let split = s.split_whitespace();
+            let mut iter = split.into_iter();
+            (
+                $(
+                    iter.next().unwrap().trim().parse::<$t>().unwrap(),
+                )*
+            )
+        }};
+}
+
+fn read_line() -> String {
+    let mut input_line = String::new();
+    io::stdin().read_line(&mut input_line).unwrap();
+    input_line
 }
 
 #[derive(Debug, PartialEq, Clone, Copy)]
@@ -19,7 +51,7 @@ impl From<i32> for CellType {
             0 => CellType::Empty,
             1 => CellType::Egg,
             2 => CellType::Crystal,
-            _ => panic!("Invalid cell type {value}"),
+            _ => panic!("Invalid cell type {}", value),
         }
     }
 }
@@ -42,8 +74,8 @@ fn find_way_len(game_state: &GameState, from: usize, to: usize) -> usize {
         if index == to {
             return len;
         }
-        visited[index as usize] = true;
-        for &neighbour in &game_state.neighbours[index as usize] {
+        visited[index] = true;
+        for &neighbour in &game_state.neighbours[index] {
             if let Some(neighbour) = neighbour {
                 if !visited[neighbour] {
                     queue.push((neighbour, len + 1));
@@ -63,48 +95,36 @@ fn find_cells_by_type(game_state: &GameState, cell_type: CellType) -> Vec<usize>
         .collect()
 }
 
-/**
- * Auto-generated code below aims at helping you parse
- * the standard input according to the problem statement.
- **/
 fn main() {
-    let mut input_line = String::new();
-    io::stdin().read_line(&mut input_line).unwrap();
-    let number_of_cells = parse_input!(input_line, i32); // amount of hexagonal cells in this map
     let mut game_state = GameState::default();
-    for _ in 0..number_of_cells as usize {
-        let mut input_line = String::new();
-        io::stdin().read_line(&mut input_line).unwrap();
-        let inputs = input_line
-            .split(" ")
-            .map(|it| it.trim())
-            .collect::<Vec<_>>();
-        let _type = parse_input!(inputs[0], i32); // 0 for empty, 1 for eggs, 2 for crystal
-        let initial_resources = parse_input!(inputs[1], i32); // the initial amount of eggs/crystals on this cell
-        let neighbours: Vec<_> = (0..6)
-            .map(|i| parse_input!(inputs[i + 2], i32))
-            .map(|i| if i < 0 { None } else { Some(i as usize) })
-            .collect(); // the index of the neighbouring cell for each direction
-        game_state.types.push(_type.into());
-        game_state.resources.push(initial_resources);
-        game_state.neighbours.push(neighbours.try_into().unwrap());
+
+    let number_of_cells = parse_single!(read_line(), usize); // amount of hexagonal cells in this map
+
+    for _ in 0..number_of_cells {
+        let input = parse_vec!(read_line(), i32);
+        if let [_type, resources, neighbors @ ..] = input.as_slice() {
+            let neighbors: [i32; 6] = neighbors.try_into().unwrap();
+            game_state.types.push((*_type).into());
+            game_state.resources.push(*resources);
+            game_state.neighbours.push(neighbors.map(|i| {
+                if i < 0 {
+                    None
+                } else {
+                    assert!(i >= 0 && i < number_of_cells as i32);
+                    Some(i.try_into().unwrap())
+                }
+            }));
+        } else {
+            panic!("Invalid input")
+        };
     }
-    let mut input_line = String::new();
-    io::stdin().read_line(&mut input_line).unwrap();
-    let number_of_bases = parse_input!(input_line, usize);
-    let mut inputs = String::new();
-    io::stdin().read_line(&mut inputs).unwrap();
-    for i in inputs.split_whitespace() {
-        let my_base_index = parse_input!(i, usize);
-        game_state.my_bases.push(my_base_index);
-    }
+
+    let number_of_bases = parse_single!(read_line(), usize);
+
+    game_state.my_bases = parse_vec!(read_line(), usize);
     assert_eq!(number_of_bases, game_state.my_bases.len());
-    let mut inputs = String::new();
-    io::stdin().read_line(&mut inputs).unwrap();
-    for i in inputs.split_whitespace() {
-        let opp_base_index = parse_input!(i, usize);
-        game_state.opp_bases.push(opp_base_index);
-    }
+
+    game_state.opp_bases = parse_vec!(read_line(), usize);
     assert_eq!(number_of_bases, game_state.opp_bases.len());
 
     // game loop
@@ -112,14 +132,11 @@ fn main() {
         game_state.resources.clear();
         game_state.my_ants.clear();
         game_state.opp_ants.clear();
-        for i in 0..number_of_cells as usize {
-            let mut input_line = String::new();
-            io::stdin().read_line(&mut input_line).unwrap();
-            let inputs = input_line.split(" ").collect::<Vec<_>>();
-            eprintln!("{inputs:?}");
-            game_state.resources.push(parse_input!(inputs[0], i32)); // the current amount of eggs/crystals on this cell
-            game_state.my_ants.push(parse_input!(inputs[1], i32)); // the amount of your ants on this cell
-            game_state.opp_ants.push(parse_input!(inputs[2], i32)); // the amount of opponent ants on this cell
+        for _i in 0..number_of_cells {
+            let (resources, my_ants, opp_ants) = parse_tuple!(read_line(), i32, i32, i32);
+            game_state.resources.push(resources); // the current amount of eggs/crystals on this cell
+            game_state.my_ants.push(my_ants); // the amount of your ants on this cell
+            game_state.opp_ants.push(opp_ants); // the amount of opponent ants on this cell
         }
 
         let crystals = find_cells_by_type(&game_state, CellType::Crystal);
