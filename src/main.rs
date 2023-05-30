@@ -67,75 +67,45 @@ struct GameState {
     opp_bases: Vec<usize>,               // indexes of opponent bases
 }
 
-fn find_way_len(game_state: &GameState, from: usize, to: usize) -> usize {
-    let mut visited = vec![false; game_state.types.len()];
-    let mut queue = vec![(from, 0)];
-    while let Some((index, len)) = queue.pop() {
-        if index == to {
-            return len;
-        }
-        visited[index] = true;
-        for &neighbour in &game_state.neighbours[index] {
-            if let Some(neighbour) = neighbour {
-                if !visited[neighbour] {
-                    queue.push((neighbour, len + 1));
-                }
-            }
-        }
-    }
-    panic!("No way from {} to {}", from, to);
-}
-
-fn find_nearest_cell(
+fn find_nearest_cell_multi(
     game_state: &GameState,
-    from: usize,
+    from: &[usize],
     cell_predicate: &impl Fn(usize) -> bool,
-) -> Option<(usize, usize)> {
-    let mut visited = vec![false; game_state.types.len()];
-    let mut queue = VecDeque::from([(from, 0)]);
-    while let Some((index, len)) = queue.pop_front() {
-        if index != from && cell_predicate(index) {
-            return Some((index, len));
+) -> Option<Vec<usize>> {
+    eprintln!("from {:?}", from);
+    let mut visited = vec![None; game_state.types.len()];
+    let mut queue = VecDeque::new();
+    fn is_start_pt(visited: &[Option<usize>], i: usize) -> bool {
+        matches!(visited[i], Some(j) if j == i)
+    }
+    for &index in from {
+        queue.push_back(index);
+        visited[index] = Some(index);
+    }
+    while let Some(index) = queue.pop_front() {
+        if cell_predicate(index) && !is_start_pt(&visited, index) {
+            let mut result = vec![];
+            let mut index = index;
+            eprintln!("visited {:?}", visited);
+            while let Some(prev_index) = visited[index] {
+                if is_start_pt(&visited, index) {
+                    break;
+                }
+                result.push(index);
+                index = prev_index;
+            }
+            return Some(result);
         }
-        visited[index] = true;
         for &neighbour in &game_state.neighbours[index] {
             if let Some(neighbour) = neighbour {
-                if !visited[neighbour] {
-                    queue.push_back((neighbour, len + 1));
+                if visited[neighbour].is_none() {
+                    visited[neighbour] = Some(index);
+                    queue.push_back(neighbour);
                 }
             }
         }
     }
     None
-}
-
-fn find_nearest_cell_multi(
-    game_state: &GameState,
-    from: &[usize],
-    cell_predicate: &impl Fn(usize) -> bool,
-) -> Option<(usize, usize, usize)> {
-    let mut best = None;
-    for from in from {
-        if let Some((index, len)) = find_nearest_cell(game_state, *from, cell_predicate) {
-            if let Some((_best_from, _best_index, best_len)) = best {
-                if len < best_len {
-                    best = Some((*from, index, len));
-                }
-            } else {
-                best = Some((*from, index, len));
-            }
-        }
-    }
-    best
-}
-
-fn find_cells_by_type(game_state: &GameState, cell_type: CellType) -> Vec<usize> {
-    game_state
-        .types
-        .iter()
-        .enumerate()
-        .filter_map(|(index, &t)| if t == cell_type { Some(index) } else { None })
-        .collect()
 }
 
 fn main() {
@@ -172,6 +142,8 @@ fn main() {
 
     // game loop
     loop {
+        let (_my_score, _op_score) = parse_tuple!(read_line(), usize, usize);
+
         game_state.resources.clear();
         game_state.my_ants.clear();
         game_state.opp_ants.clear();
@@ -183,31 +155,32 @@ fn main() {
         }
 
         //we are finding nearest cell to cells that we already have chain to, than add it to chain until run out of ants
-        let mut commands = vec![];
         let mut visited = game_state.my_bases.clone();
-        let mut ants: usize = game_state.my_ants.iter().sum();
+        let ants: usize = game_state.my_ants.iter().sum();
         let ants_k = 2;
         loop {
-            if let Some((from, to, len)) = find_nearest_cell_multi(&game_state, &visited, &|i| {
-                game_state.types[i] != CellType::Empty
-                    && game_state.resources[i] > 0
-                    && !visited.contains(&i)
+            if let Some(new_points) = find_nearest_cell_multi(&game_state, &visited, &|i| {
+                game_state.types[i] != CellType::Empty && game_state.resources[i] > 0
             }) {
-                let use_ants = ants_k * len;
-                if ants >= use_ants {
-                    ants -= ants_k * len;
-                } else if commands.len() == 0 {
-                    ants = 0;
+                eprintln!("new_points: {:?}", new_points);
+                let visited_len = visited.len();
+                let new_points_len = new_points.len();
+                let new_len = new_points_len + visited_len;
+                if new_len * ants_k <= ants || visited_len == game_state.my_bases.len() {
+                    visited.extend(new_points);
                 } else {
                     break;
                 }
-
-                visited.push(to);
-                commands.push(format!("LINE {} {} 1", from, to));
             } else {
                 break;
             }
         }
+        eprintln!("visited: {:?}", visited);
+
+        let commands = visited
+            .iter()
+            .map(|&i| format!("BEACON {} 1", i))
+            .collect::<Vec<_>>();
 
         println!("{}", commands.join(";"));
 
