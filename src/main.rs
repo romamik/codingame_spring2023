@@ -1,4 +1,4 @@
-use std::{convert::TryInto, io};
+use std::{collections::VecDeque, convert::TryInto, io};
 
 // parse single value
 macro_rules! parse_single {
@@ -59,10 +59,10 @@ impl From<i32> for CellType {
 #[derive(Default, Debug)]
 struct GameState {
     types: Vec<CellType>,                // types by index
-    resources: Vec<i32>,                 // resources by index
+    resources: Vec<usize>,               // resources by index
     neighbours: Vec<[Option<usize>; 6]>, // indexes of neighbouring cells by index
-    my_ants: Vec<i32>,                   // ant count by index
-    opp_ants: Vec<i32>,                  // opponent ant count by index
+    my_ants: Vec<usize>,                 // ant count by index
+    opp_ants: Vec<usize>,                // opponent ant count by index
     my_bases: Vec<usize>,                // indexes of my bases
     opp_bases: Vec<usize>,               // indexes of opponent bases
 }
@@ -86,6 +86,49 @@ fn find_way_len(game_state: &GameState, from: usize, to: usize) -> usize {
     panic!("No way from {} to {}", from, to);
 }
 
+fn find_nearest_cell(
+    game_state: &GameState,
+    from: usize,
+    cell_predicate: &impl Fn(usize) -> bool,
+) -> Option<(usize, usize)> {
+    let mut visited = vec![false; game_state.types.len()];
+    let mut queue = VecDeque::from([(from, 0)]);
+    while let Some((index, len)) = queue.pop_front() {
+        if index != from && cell_predicate(index) {
+            return Some((index, len));
+        }
+        visited[index] = true;
+        for &neighbour in &game_state.neighbours[index] {
+            if let Some(neighbour) = neighbour {
+                if !visited[neighbour] {
+                    queue.push_back((neighbour, len + 1));
+                }
+            }
+        }
+    }
+    None
+}
+
+fn find_nearest_cell_multi(
+    game_state: &GameState,
+    from: &[usize],
+    cell_predicate: &impl Fn(usize) -> bool,
+) -> Option<(usize, usize, usize)> {
+    let mut best = None;
+    for from in from {
+        if let Some((index, len)) = find_nearest_cell(game_state, *from, cell_predicate) {
+            if let Some((_best_from, _best_index, best_len)) = best {
+                if len < best_len {
+                    best = Some((*from, index, len));
+                }
+            } else {
+                best = Some((*from, index, len));
+            }
+        }
+    }
+    best
+}
+
 fn find_cells_by_type(game_state: &GameState, cell_type: CellType) -> Vec<usize> {
     game_state
         .types
@@ -105,7 +148,7 @@ fn main() {
         if let [_type, resources, neighbors @ ..] = input.as_slice() {
             let neighbors: [i32; 6] = neighbors.try_into().unwrap();
             game_state.types.push((*_type).into());
-            game_state.resources.push(*resources);
+            game_state.resources.push(*resources as usize);
             game_state.neighbours.push(neighbors.map(|i| {
                 if i < 0 {
                     None
@@ -133,28 +176,40 @@ fn main() {
         game_state.my_ants.clear();
         game_state.opp_ants.clear();
         for _i in 0..number_of_cells {
-            let (resources, my_ants, opp_ants) = parse_tuple!(read_line(), i32, i32, i32);
+            let (resources, my_ants, opp_ants) = parse_tuple!(read_line(), usize, usize, usize);
             game_state.resources.push(resources); // the current amount of eggs/crystals on this cell
             game_state.my_ants.push(my_ants); // the amount of your ants on this cell
             game_state.opp_ants.push(opp_ants); // the amount of opponent ants on this cell
         }
 
-        let crystals = find_cells_by_type(&game_state, CellType::Crystal);
-        eprint!("crystals: {:?}", crystals);
-        let mut base_crystal_distances = vec![];
-        for base in &game_state.my_bases {
-            for crystal in &crystals {
-                let len = find_way_len(&game_state, *base, *crystal);
-                base_crystal_distances.push((*base, *crystal, len, game_state.resources[*crystal]));
+        //we are finding nearest cell to cells that we already have chain to, than add it to chain until run out of ants
+        let mut commands = vec![];
+        let mut visited = game_state.my_bases.clone();
+        let mut ants: usize = game_state.my_ants.iter().sum();
+        let ants_k = 2;
+        loop {
+            if let Some((from, to, len)) = find_nearest_cell_multi(&game_state, &visited, &|i| {
+                game_state.types[i] != CellType::Empty
+                    && game_state.resources[i] > 0
+                    && !visited.contains(&i)
+            }) {
+                let use_ants = ants_k * len;
+                if ants >= use_ants {
+                    ants -= ants_k * len;
+                } else if commands.len() == 0 {
+                    ants = 0;
+                } else {
+                    break;
+                }
+
+                visited.push(to);
+                commands.push(format!("LINE {} {} 1", from, to));
+            } else {
+                break;
             }
         }
-        base_crystal_distances.sort_by_key(|(_, _, len, _)| *len);
-        eprintln!("base_crystal_distances: {:?}", base_crystal_distances);
 
-        // for now just use the nearest crystal
-        base_crystal_distances.retain(|(_, _, _, resources)| *resources > 0);
-        let (base, crystal, _len, _resources) = base_crystal_distances[0];
-        println!("LINE {base} {crystal} 1")
+        println!("{}", commands.join(";"));
 
         // WAIT | LINE <sourceIdx> <targetIdx> <strength> | BEACON <cellIdx> <strength> | MESSAGE <text>
         //println!("WAIT");
