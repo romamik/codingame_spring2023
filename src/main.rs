@@ -72,7 +72,6 @@ fn find_nearest_cell_multi(
     from: &[usize],
     cell_predicate: &impl Fn(usize) -> bool,
 ) -> Option<Vec<usize>> {
-    eprintln!("from {:?}", from);
     let mut visited = vec![None; game_state.types.len()];
     let mut queue = VecDeque::new();
     fn is_start_pt(visited: &[Option<usize>], i: usize) -> bool {
@@ -86,7 +85,6 @@ fn find_nearest_cell_multi(
         if cell_predicate(index) && !is_start_pt(&visited, index) {
             let mut result = vec![];
             let mut index = index;
-            eprintln!("visited {:?}", visited);
             while let Some(prev_index) = visited[index] {
                 if is_start_pt(&visited, index) {
                     break;
@@ -156,30 +154,55 @@ fn main() {
 
         //we are finding nearest cell to cells that we already have chain to, than add it to chain until run out of ants
         let mut visited = game_state.my_bases.clone();
-        let ants: usize = game_state.my_ants.iter().sum();
+        let total_ants: usize = game_state.my_ants.iter().sum();
+        let mut free_ants = total_ants;
         let ants_k = 2;
-        loop {
-            if let Some(new_points) = find_nearest_cell_multi(&game_state, &visited, &|i| {
-                game_state.types[i] != CellType::Empty && game_state.resources[i] > 0
-            }) {
-                eprintln!("new_points: {:?}", new_points);
-                let visited_len = visited.len();
-                let new_points_len = new_points.len();
-                let new_len = new_points_len + visited_len;
-                if new_len * ants_k <= ants || visited_len == game_state.my_bases.len() {
-                    visited.extend(new_points);
-                } else {
-                    break;
-                }
+        while let Some(new_points) = find_nearest_cell_multi(&game_state, &visited, &|i| {
+            game_state.types[i] != CellType::Empty && game_state.resources[i] > 0
+        }) {
+            eprintln!("new_points: {:?}", new_points);
+            eprintln!("free_ants: {:?}", free_ants);
+            let need_ants = new_points.len() * ants_k;
+            if free_ants >= need_ants || visited.len() == game_state.my_bases.len() {
+                free_ants -= need_ants.min(free_ants);
+                visited.extend(new_points);
             } else {
                 break;
             }
         }
-        eprintln!("visited: {:?}", visited);
 
-        let commands = visited
+        struct Beackon {
+            index: usize,
+            strength: usize,
+            resources: usize,
+            //my_ants: usize,
+            opp_ants: usize,
+        }
+
+        let mut beackons = visited
             .iter()
-            .map(|&i| format!("BEACON {} 1", i))
+            .map(|&i| Beackon {
+                index: i,
+                strength: ants_k, // how many ants we want to send to this cell
+                resources: game_state.resources[i],
+                //my_ants: game_state.my_ants[i], // how many ants we have on this cell
+                opp_ants: game_state.opp_ants[i],
+            })
+            .collect::<Vec<_>>();
+
+        for b in beackons.iter_mut() {
+            if b.strength < b.opp_ants && b.resources > 0 {
+                let diff = b.opp_ants - b.strength;
+                if free_ants >= diff {
+                    b.strength += diff;
+                    free_ants -= diff;
+                }
+            }
+        }
+
+        let commands = beackons
+            .iter()
+            .map(|b| format!("BEACON {} {}", b.index, b.strength))
             .collect::<Vec<_>>();
 
         println!("{}", commands.join(";"));
